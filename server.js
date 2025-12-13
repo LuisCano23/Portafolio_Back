@@ -444,11 +444,18 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ========== MANEJO DE ERRORES 404 ==========
-app.use('*', (req, res) => {
+// Esto DEBE IR AL FINAL, después de TODAS las rutas API
+app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: `Ruta no encontrada: ${req.originalUrl}`,
-    suggestion: 'Visita la ruta raíz (/) para ver los endpoints disponibles'
+    suggestion: 'Visita la ruta raíz (/) para ver los endpoints disponibles',
+    available_endpoints: {
+      home: 'GET /',
+      health: 'GET /api/health',
+      references: ['GET /api/referencias', 'POST /api/referencias'],
+      comments: ['GET /api/comments', 'POST /api/comments']
+    }
   });
 });
 
