@@ -10,9 +10,111 @@ const Comment = require('./models/commentModel');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// ========== MIDDLEWARE GLOBAL ==========
+
+// Configurar CORS para producción/desarrollo
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? process.env.CORS_ORIGIN || '*'
+    : 'http://localhost:3000',
+  credentials: true
+};
+app.use(cors(corsOptions));
+
+// Configurar headers de seguridad (soluciona error CSP)
+app.use((req, res, next) => {
+  // Content Security Policy más flexible para API
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://hcaptcha.com;"
+  );
+  
+  // Otros headers de seguridad recomendados
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  
+  next();
+});
+
 app.use(express.json());
+
+// ========== RUTA RAIZ (HOME) - NUEVA ==========
+app.get('/', (req, res) => {
+  res.json({
+    status: 'success',
+    message: '🚀 API del Portafolio funcionando correctamente',
+    version: '1.0.0',
+    documentation: 'Consulta los endpoints disponibles',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      referencias: {
+        getAll: 'GET /api/referencias',
+        getById: 'GET /api/referencias/:id',
+        create: 'POST /api/referencias'
+      },
+      comments: {
+        getAll: 'GET /api/comments?page=1&limit=6',
+        getById: 'GET /api/comments/:id',
+        create: 'POST /api/comments',
+        delete: 'DELETE /api/comments/:id (admin)',
+        stats: 'GET /api/comments/stats'
+      },
+      health: 'GET /api/health'
+    }
+  });
+});
+
+// ========== FUNCIÓN PARA VERIFICAR hCAPTCHA (REUTILIZABLE) ==========
+const verifyCaptcha = (captchaToken) => {
+  return new Promise((resolve, reject) => {
+    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY;
+    
+    // En desarrollo, simular éxito si no hay clave secreta
+    if (process.env.NODE_ENV !== 'production' && (!hcaptchaSecret || hcaptchaSecret.includes('ES_'))) {
+      return resolve({ success: true, challenge_ts: new Date().toISOString(), hostname: 'localhost' });
+    }
+
+    const postData = `secret=${hcaptchaSecret}&response=${captchaToken}`;
+
+    const options = {
+      hostname: 'hcaptcha.com',
+      port: 443,
+      path: '/siteverify',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': postData.length
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      reject(error);
+    });
+
+    req.write(postData);
+    req.end();
+  });
+};
 
 // ========== RUTAS DE REFERENCIAS ==========
 
@@ -63,50 +165,7 @@ app.get('/api/referencias/:id', async (req, res) => {
   }
 });
 
-// Función para verificar hCaptcha (se usará en ambas rutas)
-const verifyCaptcha = (captchaToken) => {
-  return new Promise((resolve, reject) => {
-    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY;
-    const postData = `secret=${hcaptchaSecret}&response=${captchaToken}`;
-
-    const options = {
-      hostname: 'hcaptcha.com',
-      port: 443,
-      path: '/siteverify',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': postData.length
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      res.on('end', () => {
-        try {
-          const result = JSON.parse(data);
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      reject(error);
-    });
-
-    req.write(postData);
-    req.end();
-  });
-};
-
-// Crear una nueva referencia CON CAPTCHA (actualizado)
+// Crear una nueva referencia CON CAPTCHA
 app.post('/api/referencias', async (req, res) => {
   try {
     const { nombre, titulo, correo, carta, captchaToken } = req.body;
@@ -155,16 +214,14 @@ app.post('/api/referencias', async (req, res) => {
         }
       } catch (captchaError) {
         console.error('Error al verificar hCaptcha (referencia):', captchaError.message);
-        if (process.env.NODE_ENV === 'production') {
-          return res.status(500).json({
-            success: false,
-            error: 'Error al verificar el captcha'
-          });
-        }
+        return res.status(500).json({
+          success: false,
+          error: 'Error al verificar el captcha'
+        });
       }
     }
     
-    // Crear la referencia (sin el campo captchaToken)
+    // Crear la referencia
     const nuevaReferencia = await Referencia.create({ nombre, titulo, correo, carta });
     
     res.status(201).json({
@@ -260,12 +317,10 @@ app.post('/api/comments', async (req, res) => {
         }
       } catch (captchaError) {
         console.error('Error al verificar hCaptcha (comentario):', captchaError.message);
-        if (process.env.NODE_ENV === 'production') {
-          return res.status(500).json({
-            success: false,
-            error: 'Error al verificar el captcha'
-          });
-        }
+        return res.status(500).json({
+          success: false,
+          error: 'Error al verificar el captcha'
+        });
       }
     }
 
@@ -359,33 +414,64 @@ app.get('/api/comments/stats', async (req, res) => {
   }
 });
 
-// ========== RUTA DE PRUEBA ==========
+// ========== RUTA DE SALUD MEJORADA ==========
 app.get('/api/health', async (req, res) => {
   try {
+    // Intenta conectar a la base de datos para verificar salud completa
+    const dbHealth = await Comment.getStats(); // Usamos stats como prueba de conexión DB
+    
     res.json({
       status: 'healthy',
-      message: 'Servidor funcionando correctamente',
+      message: '✅ Servidor y base de datos funcionando correctamente',
       timestamp: new Date().toISOString(),
-      database: 'PostgreSQL',
-      environment: process.env.NODE_ENV || 'development'
+      uptime: process.uptime(),
+      database: {
+        status: 'connected',
+        type: 'PostgreSQL',
+        environment: process.env.NODE_ENV || 'development'
+      },
+      environment: process.env.NODE_ENV || 'development',
+      version: '1.0.0'
     });
   } catch (error) {
     res.status(500).json({
       status: 'unhealthy',
-      error: error.message
+      error: error.message,
+      database: 'disconnected',
+      timestamp: new Date().toISOString()
     });
   }
 });
 
+// ========== MANEJO DE ERRORES 404 ==========
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Ruta no encontrada: ${req.originalUrl}`,
+    suggestion: 'Visita la ruta raíz (/) para ver los endpoints disponibles'
+  });
+});
+
 // ========== INICIAR SERVIDOR ==========
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor backend corriendo en http://localhost:${PORT}`);
-  console.log(`📊 Base de datos: PostgreSQL`);
-  console.log(`🔐 hCaptcha: ${process.env.NODE_ENV === 'production' ? 'Activado' : 'Modo desarrollo'}`);
-  console.log(`📝 Endpoints disponibles:`);
-  console.log(`   GET  /api/referencias`);
-  console.log(`   POST /api/referencias`);
-  console.log(`   GET  /api/comments?page=1&limit=6`);
-  console.log(`   POST /api/comments`);
-  console.log(`   GET  /api/health`);
+  console.log(`
+  🚀  Servidor backend iniciado
+  🔗  Local: http://localhost:${PORT}
+  🌐  Entorno: ${process.env.NODE_ENV || 'development'}
+  📊  Base de datos: PostgreSQL ${process.env.DB_NAME || 'portfolio_db'}
+  🔐  hCaptcha: ${process.env.NODE_ENV === 'production' ? 'Activado' : 'Modo desarrollo'}
+  
+  📍  Endpoints principales:
+      GET  /                 → API Home
+      GET  /api/health       → Health Check
+      GET  /api/referencias  → Listar referencias
+      POST /api/referencias  → Crear referencia
+      GET  /api/comments     → Listar comentarios
+      POST /api/comments     → Crear comentario
+  
+  ⚠️   En producción, asegúrate de configurar:
+      - CORS_ORIGIN con la URL de tu frontend
+      - Variables de entorno de Neon PostgreSQL
+      - Claves reales de hCaptcha
+  `);
 });
