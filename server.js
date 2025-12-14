@@ -26,7 +26,7 @@ app.use((req, res, next) => {
   // Content Security Policy más flexible para API
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://hcaptcha.com;"
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self';"
   );
   
   // Otros headers de seguridad recomendados
@@ -40,7 +40,7 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// ========== RUTA RAIZ (HOME) - NUEVA ==========
+// ========== RUTA RAIZ (HOME) ==========
 app.get('/', (req, res) => {
   res.json({
     status: 'success',
@@ -70,6 +70,15 @@ app.get('/', (req, res) => {
 // ========== FUNCIÓN PARA VERIFICAR hCAPTCHA (REUTILIZABLE) ==========
 const verifyCaptcha = (captchaToken) => {
   return new Promise((resolve, reject) => {
+    // TEMPORALMENTE DESACTIVADO - Siempre retorna éxito
+    console.log('⚠️  hCaptcha temporalmente desactivado para pruebas');
+    return resolve({ 
+      success: true, 
+      challenge_ts: new Date().toISOString(), 
+      hostname: req?.headers?.host || 'localhost' 
+    });
+    
+    /* CÓDIGO ORIGINAL (COMENTADO)
     const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY;
     
     // En desarrollo, simular éxito si no hay clave secreta
@@ -113,6 +122,7 @@ const verifyCaptcha = (captchaToken) => {
 
     req.write(postData);
     req.end();
+    */
   });
 };
 
@@ -165,7 +175,7 @@ app.get('/api/referencias/:id', async (req, res) => {
   }
 });
 
-// Crear una nueva referencia CON CAPTCHA
+// Crear una nueva referencia (SIN CAPTCHA TEMPORALMENTE)
 app.post('/api/referencias', async (req, res) => {
   try {
     const { nombre, titulo, correo, carta, captchaToken } = req.body;
@@ -193,7 +203,8 @@ app.post('/api/referencias', async (req, res) => {
       });
     }
 
-    // Verificar hCaptcha (solo en producción)
+    // TEMPORALMENTE DESACTIVADO: Verificar hCaptcha (solo en producción)
+    /*
     if (process.env.NODE_ENV === 'production') {
       if (!captchaToken) {
         return res.status(400).json({
@@ -220,6 +231,7 @@ app.post('/api/referencias', async (req, res) => {
         });
       }
     }
+    */
     
     // Crear la referencia
     const nuevaReferencia = await Referencia.create({ nombre, titulo, correo, carta });
@@ -268,7 +280,7 @@ app.get('/api/comments', async (req, res) => {
   }
 });
 
-// Crear un nuevo comentario con verificación de hCaptcha
+// Crear un nuevo comentario (SIN CAPTCHA TEMPORALMENTE)
 app.post('/api/comments', async (req, res) => {
   try {
     const { nombre, comentario, captchaToken } = req.body;
@@ -296,7 +308,8 @@ app.post('/api/comments', async (req, res) => {
       });
     }
 
-    // Verificar hCaptcha (solo en producción)
+    // TEMPORALMENTE DESACTIVADO: Verificar hCaptcha (solo en producción)
+    /*
     if (process.env.NODE_ENV === 'production') {
       if (!captchaToken) {
         return res.status(400).json({
@@ -323,6 +336,7 @@ app.post('/api/comments', async (req, res) => {
         });
       }
     }
+    */
 
     // Crear el comentario en la base de datos
     const nuevoComentario = await Comment.create({ nombre, comentario });
@@ -466,19 +480,16 @@ app.listen(PORT, () => {
   🔗  Local: http://localhost:${PORT}
   🌐  Entorno: ${process.env.NODE_ENV || 'development'}
   📊  Base de datos: PostgreSQL ${process.env.DB_NAME || 'portfolio_db'}
-  🔐  hCaptcha: ${process.env.NODE_ENV === 'production' ? 'Activado' : 'Modo desarrollo'}
+  🔐  hCaptcha: TEMPORALMENTE DESACTIVADO
   
   📍  Endpoints principales:
       GET  /                 → API Home
       GET  /api/health       → Health Check
       GET  /api/referencias  → Listar referencias
-      POST /api/referencias  → Crear referencia
+      POST /api/referencias  → Crear referencia (sin captcha)
       GET  /api/comments     → Listar comentarios
-      POST /api/comments     → Crear comentario
+      POST /api/comments     → Crear comentario (sin captcha)
   
-  ⚠️   En producción, asegúrate de configurar:
-      - CORS_ORIGIN con la URL de tu frontend
-      - Variables de entorno de Neon PostgreSQL
-      - Claves reales de hCaptcha
+  ⚠️   hCaptcha está temporalmente desactivado para pruebas
   `);
 });
